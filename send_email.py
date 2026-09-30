@@ -86,6 +86,11 @@ POLITICS_FEEDS = {
     'NYT世界（美国视角）': 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
 }
 
+try:
+    import trafilatura
+except ImportError:
+    trafilatura = None
+
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
 FETCH_TIMEOUT = 15          # RSS 请求超时（秒）
@@ -426,12 +431,44 @@ def fallback_result(n):
     }
 
 
+def fetch_full_text(news_list, max_chars=3000):
+    """并发抓取选中文章的正文（trafilatura 抽取），失败时保留 RSS 摘要兜底"""
+    if trafilatura is None:
+        logging.warning('  未安装 trafilatura，跳过正文抓取，使用 RSS 摘要')
+        return
+
+    def _fetch(n):
+        url = n.get('url')
+        if not url:
+            return
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=10)
+            resp.raise_for_status()
+            text = trafilatura.extract(resp.text, include_comments=False,
+                                       include_tables=False) or ''
+            text = strip_html(text).strip()
+            # 抽取结果太短说明页面是反爬壳或正文识别失败，不可信
+            if len(text) > 200:
+                n['full_text'] = text[:max_chars]
+        except Exception:
+            pass
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(_fetch, news_list))
+    got = sum(1 for n in news_list if n.get('full_text'))
+    logging.info(f'  正文抓取成功 {got}/{len(news_list)} 条')
+
+
 def analyze_article(client, n, kind):
-    """分析单条新闻，输出分类/摘要/关键数据/点评"""
+    """分析单条新闻，输出分类/摘要/关键数据/点评/重要性评分"""
     conf = PIPELINE[kind]
+    content = n.get('full_text') or (n.get('content') or '')[:300]
+    content_note = '（以下为文章正文节选）' if n.get('full_text') else '（以下为 RSS 摘要，信息有限请勿过度发挥）'
     prompt = f"""分析这条{conf['label']}新闻，输出JSON：
 标题：{n['title']}
 来源：{n['source']}
+{content_note}
+{content}
 
 输出格式（只输出JSON）：
 {{
@@ -535,6 +572,7 @@ def run_pipeline(kind):
         news.sort(key=focus_hits, reverse=True)  # 命中关注关键词的排前面，引导 AI 优先选
 
     sampled = ai_select(news, kind, max_total=conf['max_total'])
+    fetch_full_text(sampled)
     analyzed = analyze_all(sampled, kind)
     return analyzed, {'fetched': fetched, 'selected': len(analyzed)}
 
