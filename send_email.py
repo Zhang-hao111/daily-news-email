@@ -459,6 +459,14 @@ def fetch_full_text(news_list, max_chars=3000):
     logging.info(f'  正文抓取成功 {got}/{len(news_list)} 条')
 
 
+def _parse_score(value):
+    """AI 返回的重要性评分转 1-10 整数，异常给 0（排序时垫底但不影响展示）"""
+    try:
+        return max(1, min(10, int(float(value))))
+    except (TypeError, ValueError):
+        return 0
+
+
 def analyze_article(client, n, kind):
     """分析单条新闻，输出分类/摘要/关键数据/点评/重要性评分"""
     conf = PIPELINE[kind]
@@ -475,7 +483,8 @@ def analyze_article(client, n, kind):
   "category": "{conf['category']}",
   "summary": "2-3句话摘要",
   "key_data": "{conf['key_data']}",
-  "comment": "简短点评"
+  "comment": "简短点评",
+  "score": "1-10的整数，新闻重要性评分（10=全球重大事件，7-8=行业大事，5-6=常规动态，4以下=琐碎）"
 }}"""
 
     def call():
@@ -503,6 +512,7 @@ def analyze_article(client, n, kind):
         'summary': result.get('summary') or (n.get('content') or '')[:200],
         'key_data': result.get('key_data') or '无',
         'comment': result.get('comment') or '无',
+        'score': _parse_score(result.get('score')),
     }
 
 
@@ -611,6 +621,7 @@ def record_week_items(items, now_dt):
             'summary': (n.get('summary') or '')[:200],
             'key_data': n.get('key_data', '无'),
             'comment': n.get('comment', '无'),
+            'score': n.get('score', 0),
         })
     try:
         STATE_DIR.mkdir(exist_ok=True)
@@ -742,6 +753,7 @@ def generate_weekly_report(now_dt):
     date_to = date_from + timedelta(days=6)            # 上周周日
 
     selected = ai_select_weekly(items, max_total=WEEKLY_MAX_TOTAL)
+    selected.sort(key=lambda n: n.get('score') or 0, reverse=True)  # 本周头条置顶
     overview = ai_overview(selected, label='本周')
     md = generate_weekly_markdown(selected, label, date_from, date_to, overview,
                                   stats={'fetched': len(items), 'selected': len(selected)})
@@ -781,7 +793,7 @@ def generate_markdown(analyzed_news, date_str, overview='', stats=None):
     for cat in CATEGORY_ORDER:
         if cat not in by_category:
             continue
-        items = by_category[cat]
+        items = sorted(by_category[cat], key=lambda x: x.get('score') or 0, reverse=True)
         md += f'## {cat}\n\n'
 
         # 每个分类前3条为重要新闻，其余为简略
