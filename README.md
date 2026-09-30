@@ -6,12 +6,13 @@ RSS 抓取 → DeepSeek AI 筛选/分析 → Markdown 报告 → 邮件推送，
 
 - **三条并行管道**：科技（14 源：36氪、少数派、爱范儿、Solidot、量子位、IT之家、极客公园、钛媒体、TechCrunch、The Verge、Hacker News、Ars Technica、MIT科技评论、BBC科技）＋ 政治（4 源：BBC World、卫报、半岛电视台、NYT World）＋ 财经（8 源：华尔街见闻、CNBC、MarketWatch、SeekingAlpha、Bloomberg、Yahoo Finance、Investing、经济学人）
 - **AI 精选**：每天从约 300 条里挑 20 条（科技 12 / 政治 4 / 财经 4），跨源去重、排除软文、保证领域多样性，取舍完全交给大模型
-- **正文级分析**：AI 筛选后并发抓取文章正文（trafilatura 抽取），摘要基于全文而非 RSS 摘要
+- **正文级分析**：AI 筛选后并发抓取文章正文（trafilatura 抽取，反爬站点经 r.jina.ai 兜底），摘要基于全文而非 RSS 摘要
 - **逐条分析 + 重要性评分**：分类 + 2~3 句摘要 + 关键数据 + 简短点评 + 1~10 重要性评分，分类内按分排序，头条真实化
 - **跨分类事件去重**：同一事件的多篇报道自动合并为信息量最大的一条
 - **AI 今日综述 + 市场快照**：整体趋势概括，外加 A 股三大指数行情（东方财富公开接口）
 - **周报**：每天自动积累当日精选，周一自动汇总出上周最重要的 15 条（`--weekly` 可手动触发）
 - **过滤链**：新鲜度过滤（默认 36 小时）→ 跨天防重复推送 → 关注/排除关键词
+- **源健康自动摘除**：连续 7 天无数据的源自动停用并在日报标注，每 14 天自动复检，成功即恢复
 - **推送**：SMTP 邮件（HTML + 纯文本兜底）＋ 可选飞书/钉钉/企业微信群机器人 webhook
 - **可选 Obsidian 归档**：存入 `daily-briefing/` 并自动在当天日记挂上 wikilink
 - **可观测**：控制台 + `logs/年月.log` 落盘日志，`--dry-run` 干跑模式（完整跑链路但不发邮件不写档）
@@ -39,6 +40,8 @@ python send_email.py --dry-run   # 干跑验证（调 AI，但不发邮件/不�
 | `EXCLUDE_KEYWORDS` | 可选 | 排除关键词，标题命中即过滤（拦截软文/广告） |
 | `NEWS_MAX_AGE_HOURS` | 可选 | 新鲜度窗口，默认 36 小时 |
 | `PUSH_WEBHOOK_URL` / `PUSH_WEBHOOK_TYPE` | 可选 | 群机器人推送（`feishu`/`dingtalk`/`wecom`），留空不推送 |
+
+增删 RSS 源、加新闻管道、调整每日保留条数：编辑 **`config.yaml`**，无需改代码。
 
 ### 云端部署（GitHub Actions，推荐）
 
