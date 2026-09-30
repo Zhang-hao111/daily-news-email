@@ -443,31 +443,47 @@ def fallback_result(n):
 
 
 def fetch_full_text(news_list, max_chars=3000):
-    """并发抓取选中文章的正文（trafilatura 抽取），失败时保留 RSS 摘要兜底"""
+    """并发抓取选中文章的正文（trafilatura 抽取，反爬站点经 r.jina.ai 兜底），失败保留 RSS 摘要"""
     if trafilatura is None:
         logging.warning('  未安装 trafilatura，跳过正文抓取，使用 RSS 摘要')
         return
+
+    def _extract(html):
+        text = trafilatura.extract(html, include_comments=False,
+                                   include_tables=False) or ''
+        return strip_html(text).strip()
 
     def _fetch(n):
         url = n.get('url')
         if not url:
             return
-        try:
-            resp = requests.get(url, headers=HEADERS, timeout=10)
-            resp.raise_for_status()
-            text = trafilatura.extract(resp.text, include_comments=False,
-                                       include_tables=False) or ''
-            text = strip_html(text).strip()
-            # 抽取结果太短说明页面是反爬壳或正文识别失败，不可信
-            if len(text) > 200:
-                n['full_text'] = text[:max_chars]
-        except Exception:
-            pass
+        # 先直连抽取；结果太短说明是反爬壳页面，改走 r.jina.ai 免费阅读代理
+        for attempt, target in enumerate((url, f'https://r.jina.ai/{url}')):
+            try:
+                resp = requests.get(target, headers=HEADERS, timeout=20 if attempt else 10)
+                resp.raise_for_status()
+                if attempt == 0:
+                    text = _extract(resp.text)
+                else:
+                    raw = resp.text
+                    if 'Markdown Content:' in raw:  # 去掉 jina 返回的元信息头
+                        raw = raw.split('Markdown Content:', 1)[1]
+                    text = strip_html(raw).strip()
+                # 抽取结果太短说明反爬壳或正文识别失败，不可信
+                if len(text) > 200:
+                    n['full_text'] = text[:max_chars]
+                    if attempt:
+                        jina_hits.append(n['title'])
+                    return
+            except Exception:
+                continue
 
+    jina_hits = []
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(_fetch, news_list))
     got = sum(1 for n in news_list if n.get('full_text'))
-    logging.info(f'  正文抓取成功 {got}/{len(news_list)} 条')
+    extra = f'（其中 {len(jina_hits)} 条经 jina 兜底）' if jina_hits else ''
+    logging.info(f'  正文抓取成功 {got}/{len(news_list)} 条{extra}')
 
 
 def _parse_score(value):
