@@ -1121,7 +1121,7 @@ def main(dry_run=False):
         futures = {kind: pool.submit(run_pipeline, kind) for kind in PIPELINE}
     all_items = []
     fetched_total = selected_total = 0
-    for kind, fut in futures.items():
+    for _kind, fut in futures.items():
         items, st = fut.result()
         all_items.extend(items)
         fetched_total += st['fetched']
