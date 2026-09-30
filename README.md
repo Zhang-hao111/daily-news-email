@@ -46,9 +46,7 @@ python send_email.py --dry-run   # 干跑验证（调 AI，但不发邮件/不�
 2. 仓库 Settings → Secrets and variables → Actions，添加上表中的 Secrets（至少 DeepSeek 和 SMTP 五项）
 3. 完成 —— `.github/workflows/daily.yml` 每天 UTC 01:05（北京时间 09:05）自动运行，也可在 Actions 页手动触发
 
-云端不需要配置 `OBSIDIAN_VAULT_PATH`（自动跳过存档）；`state/` 目录（防重复记录 + 周报积累）通过 Actions Cache 跨运行持久化。
-
-> 注意：GitHub 会在仓库 60 天无提交后停用定时工作流，偶尔推个提交即可保活。
+云端不需要配置 `OBSIDIAN_VAULT_PATH`（自动跳过存档）；`state/` 目录（防重复记录 + 周报积累）通过 Actions Cache 跨运行持久化。发件邮箱注意：QQ/163 等国内邮箱的 SMTP 会拒绝 GitHub Actions 海外 IP，云端建议用 Gmail（应用专用密码，端口 587），本机运行则无限制。仓库 60 天无提交会停用定时工作流，自带 `keepalive.yml` 保活。
 
 ## 本地定时（Windows）
 
