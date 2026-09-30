@@ -45,7 +45,7 @@ Single-file script (`send_email.py`). Pipeline definitions, prompts and all RSS 
 - `NEWS_MAX_AGE_HOURS` (default 36) — freshness filter, old articles are dropped
 - `FOCUS_KEYWORDS` / `EXCLUDE_KEYWORDS` — comma-separated; focus keywords boost articles in AI selection, exclude keywords drop soft-ad titles before AI
 - `PUSH_WEBHOOK_URL` + `PUSH_WEBHOOK_TYPE` (`feishu`/`dingtalk`/`wecom`) — optional group-bot push in addition to email
-- `.github/workflows/daily.yml` — optional serverless scheduling on GitHub Actions (cron 01:05 UTC = 09:05 北京时间); configure repo Secrets instead of `.env`; Obsidian steps auto-skip; use this OR the local `setup_task.bat`, not both (duplicate emails)
+- `.github/workflows/daily.yml` — optional serverless scheduling on GitHub Actions (cron 01:23 UTC = 约 09:23 北京时间); configure repo Secrets instead of `.env`; Obsidian steps auto-skip; use this OR the local `setup_task.bat`, not both (duplicate emails)
 - `.github/workflows/keepalive.yml` — monthly empty commit so the 60-day-inactivity rule never disables the scheduled workflow
 
 ## Weekly Report
