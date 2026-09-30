@@ -32,6 +32,7 @@ VAULT_PATH = _env('OBSIDIAN_VAULT_PATH')
 DEEPSEEK_KEY = _env('DEEPSEEK_API_KEY')
 DEEPSEEK_URL = _env('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
 DEEPSEEK_MODEL = _env('DEEPSEEK_MODEL', 'deepseek-chat')
+REASONING_EFFORT = _env('DEEPSEEK_REASONING_EFFORT', 'none')  # 推理模型默认关闭思考：机械抽取任务无需思维链，且思考会吃满 max_tokens 导致 JSON 截断
 SMTP_HOST = _env('SMTP_HOST')
 SMTP_PORT = int(_env('SMTP_PORT', '465'))
 SMTP_USER = _env('SMTP_USER')
@@ -412,6 +413,7 @@ def ai_select(news_list, kind, max_total):
             lambda: client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
+            extra_body={'reasoning_effort': REASONING_EFFORT},
                 temperature=0.3,
                 max_tokens=8000,
             ),
@@ -500,6 +502,7 @@ def analyze_article(client, n, kind):
         resp = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
+            extra_body={'reasoning_effort': REASONING_EFFORT},
             temperature=0.3,
             max_tokens=4000,  # deepseek-flash 的思考也计入 max_tokens，预算须覆盖思维链+回答
         )
@@ -562,6 +565,7 @@ def ai_overview(analyzed_news, label='今日'):
             lambda: client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
+            extra_body={'reasoning_effort': REASONING_EFFORT},
                 temperature=0.3,
                 max_tokens=2000,
             ),
@@ -694,6 +698,7 @@ def ai_select_weekly(items, max_total=WEEKLY_MAX_TOTAL):
             lambda: client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
+            extra_body={'reasoning_effort': REASONING_EFFORT},
                 temperature=0.3,
                 max_tokens=8000,
             ),
@@ -797,6 +802,7 @@ def dedupe_events(analyzed):
             lambda: client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
+            extra_body={'reasoning_effort': REASONING_EFFORT},
                 temperature=0.1,
                 max_tokens=4000,
             ),
