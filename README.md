@@ -63,6 +63,8 @@ python send_email.py --dry-run   # 干跑：真实调 AI 生成报告存到 logs
 python send_email.py --weekly    # 手动生成上周周报（平时周一自动）
 ```
 
+开发：`pip install -r requirements-dev.txt`，提交前跑 `ruff check .` 和 `pytest`（CI 也会自动跑）。
+
 ## 架构
 
 单文件 `send_email.py`，`PIPELINE` 配置字典定义各管道差异，加一类新闻只需加一项配置：
