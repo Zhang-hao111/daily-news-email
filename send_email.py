@@ -814,7 +814,33 @@ def dedupe_events(analyzed):
 
 
 # ========== 第3步：生成 Markdown ==========
-def generate_markdown(analyzed_news, date_str, overview='', stats=None):
+def fetch_market_snapshot():
+    """A股三大指数快照（东方财富公开接口，无需鉴权），失败返回空串"""
+    try:
+        url = ('https://push2.eastmoney.com/api/qt/ulist.np/get'
+               '?secids=1.000001,0.399001,0.399006'  # 上证指数/深证成指/创业板指
+               '&fields=f2,f3,f12,f14&fltt=2&invt=2')
+        resp = call_with_retry(
+            lambda: requests.get(url, timeout=10, headers=HEADERS),
+            retries=2, description='行情接口',
+        )
+        rows = resp.json().get('data', {}).get('diff') or []
+        lines = []
+        for d in rows:
+            name, close, pct = d.get('f14'), d.get('f2'), d.get('f3')
+            if isinstance(close, (int, float)) and isinstance(pct, (int, float)):
+                icon = '🔴' if pct > 0 else ('🟢' if pct < 0 else '⚪')
+                lines.append(f'- {icon} {name}：{close:,.2f}（{pct:+.2f}%）')
+        if not lines:
+            logging.warning('  行情接口返回空数据，跳过市场快照')
+            return ''
+        return '\n'.join(lines)
+    except Exception as e:
+        logging.warning(f'  市场快照获取失败，跳过: {e}')
+        return ''
+
+
+def generate_markdown(analyzed_news, date_str, overview='', stats=None, market_md=''):
     """生成 Markdown 内容：统计头 + AI 综述 + 按分类分组的正文"""
     md = f'# 每日热点汇报 - {date_str}\n\n'
 
@@ -831,6 +857,9 @@ def generate_markdown(analyzed_news, date_str, overview='', stats=None):
         if cat_summary:
             md += f'（{cat_summary}）'
         md += '\n\n---\n\n'
+
+    if market_md:
+        md += '## 📈 市场快照\n\n' + market_md + '\n\n---\n\n'
 
     # 按分类分组
     by_category = {}
@@ -1075,8 +1104,9 @@ def main(dry_run=False):
     logging.info('[2/3] 生成报告...')
     all_items = dedupe_events(all_items)
     stats['selected'] = len(all_items)
+    market_md = fetch_market_snapshot()
     overview = ai_overview(all_items)
-    md_content = generate_markdown(all_items, today, overview, stats)
+    md_content = generate_markdown(all_items, today, overview, stats, market_md)
 
     if dry_run:
         # 干跑：完整跑通抓取/AI/报告，但不写 Obsidian、不发邮件、不记防重复状态
