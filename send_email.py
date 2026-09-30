@@ -404,7 +404,7 @@ def ai_select(news_list, kind, max_total):
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.3,
-                max_tokens=1000,
+                max_tokens=3000,
             ),
             description='AI 筛选',
         )
@@ -492,7 +492,7 @@ def analyze_article(client, n, kind):
             model=DEEPSEEK_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
             temperature=0.3,
-            max_tokens=500,
+            max_tokens=4000,  # deepseek-flash 的思考也计入 max_tokens，预算须覆盖思维链+回答
         )
         return parse_json(resp.choices[0].message.content)
 
@@ -554,7 +554,7 @@ def ai_overview(analyzed_news, label='今日'):
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.3,
-                max_tokens=400,
+                max_tokens=2000,
             ),
             description=f'{label}综述',
         )
@@ -686,7 +686,7 @@ def ai_select_weekly(items, max_total=WEEKLY_MAX_TOTAL):
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.3,
-                max_tokens=800,
+                max_tokens=3000,
             ),
             description='周报 AI 筛选',
         )
@@ -789,7 +789,7 @@ def dedupe_events(analyzed):
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.1,
-                max_tokens=500,
+                max_tokens=2000,
             ),
             description='事件去重',
         )
