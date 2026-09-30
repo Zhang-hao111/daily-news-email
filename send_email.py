@@ -766,6 +766,53 @@ def generate_weekly_report(now_dt):
     logging.info(f'===== 周报 {label} 完成 =====')
 
 
+def dedupe_events(analyzed):
+    """跨分类事件去重：同一事件的多篇报道只保留 AI 认为信息量最大的一条，失败时原样返回"""
+    client = get_ds_client()
+    if client is None or len(analyzed) < 2:
+        return analyzed
+
+    lines = '\n'.join(
+        f"[{i}] ({n.get('category', '')}) {n['title']} — {(n.get('summary') or '')[:60]}"
+        for i, n in enumerate(analyzed)
+    )
+    prompt = f"""以下是今天的 {len(analyzed)} 条新闻。请找出描述同一事件的多条报道（不同来源/角度报道同一件事），每组只保留信息量最大的一条。
+
+新闻列表：
+{lines}
+
+只输出 JSON：{{"groups": [{{"keep": 0, "drop": [3, 7]}}]}}，keep 是保留条目的编号，drop 是同事件要丢弃的编号列表。没有重复事件则输出 {{"groups": []}}，不要输出其他内容。"""
+
+    try:
+        resp = call_with_retry(
+            lambda: client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=[{'role': 'user', 'content': prompt}],
+                temperature=0.1,
+                max_tokens=500,
+            ),
+            description='事件去重',
+        )
+        data = parse_json(resp.choices[0].message.content)
+        drop = set()
+        for group in data.get('groups', []):
+            keep = group.get('keep')
+            if not (isinstance(keep, (int, float)) and 0 <= int(keep) < len(analyzed)):
+                continue
+            for d in group.get('drop', []):
+                if isinstance(d, (int, float)) and 0 <= int(d) < len(analyzed) and int(d) != int(keep):
+                    drop.add(int(d))
+        if not drop:
+            logging.info('  事件去重：无同事件报道')
+            return analyzed
+        out = [n for i, n in enumerate(analyzed) if i not in drop]
+        logging.info(f'  事件去重：合并 {len(drop)} 条同事件报道，剩 {len(out)} 条')
+        return out
+    except Exception as e:
+        logging.warning(f'  事件去重失败，跳过: {e}')
+        return analyzed
+
+
 # ========== 第3步：生成 Markdown ==========
 def generate_markdown(analyzed_news, date_str, overview='', stats=None):
     """生成 Markdown 内容：统计头 + AI 综述 + 按分类分组的正文"""
@@ -1024,8 +1071,10 @@ def main(dry_run=False):
         selected_total += st['selected']
     stats = {'fetched': fetched_total, 'selected': selected_total}
 
-    # 2. 综述 + 报告
+    # 2. 事件去重 + 综述 + 报告
     logging.info('[2/3] 生成报告...')
+    all_items = dedupe_events(all_items)
+    stats['selected'] = len(all_items)
     overview = ai_overview(all_items)
     md_content = generate_markdown(all_items, today, overview, stats)
 
