@@ -99,6 +99,8 @@ AI_MAX_WORKERS = 6          # AI 分析并发数，过高可能触发 API 限流
 FETCH_MAX_WORKERS = 10      # RSS 抓取并发数
 SEEN_MAX_DAYS = 7           # 已推送链接的保留天数，期间不重复推送
 WEEKLY_MAX_TOTAL = 15       # 周报最终保留的条数
+SOURCE_FAIL_DISABLE_DAYS = int(_env('SOURCE_FAIL_DISABLE_DAYS', '7'))    # 连续 N 天无数据 → 停用
+SOURCE_PROBE_INTERVAL_DAYS = int(_env('SOURCE_PROBE_INTERVAL_DAYS', '14'))  # 停用后每隔 N 天复检一次
 
 # tech / finance / politics 三条管道的差异都收敛在这几个映射里
 PIPELINE = {
@@ -151,6 +153,7 @@ DIGEST_KEYWORDS = ['晚报', '早报', '日报', '周报', '速报', '快讯', '
 LOG_DIR = Path(__file__).resolve().parent / 'logs'
 STATE_DIR = Path(__file__).resolve().parent / 'state'
 SEEN_FILE = STATE_DIR / 'seen_urls.json'
+SOURCE_HEALTH_FILE = STATE_DIR / 'source_health.json'
 
 
 def setup_logging():
@@ -266,7 +269,7 @@ def fetch_rss(url, timeout=FETCH_TIMEOUT):
 
 
 def fetch_all_news(feeds):
-    """并发抓取指定 RSS 源，按源顺序汇总"""
+    """并发抓取指定 RSS 源，按源顺序汇总，返回 (新闻列表, 各源条数)"""
     by_name = {}
     with ThreadPoolExecutor(max_workers=min(FETCH_MAX_WORKERS, len(feeds))) as pool:
         futures = {pool.submit(fetch_rss, url): name for name, url in feeds.items()}
@@ -274,13 +277,56 @@ def fetch_all_news(feeds):
             by_name[futures[fut]] = fut.result()
 
     all_news = []
+    counts = {}
     for name in feeds:  # 保持源顺序，方便对照日志
         items = by_name.get(name, [])
+        counts[name] = len(items)
         logging.info(f'  {name}: {len(items)} 条')
         for item in items:
             item['source'] = name
         all_news.extend(items)
-    return all_news
+    return all_news, counts
+
+
+def _days_since(date_str):
+    try:
+        return (datetime.now() - datetime.strptime(date_str, '%Y-%m-%d')).days
+    except (TypeError, ValueError):
+        return 0
+
+
+def update_source_health(counts, today_str=None):
+    """记录各源当日抓取结果：有数据则清零恢复，无数据则累加连续失败天数"""
+    today_str = today_str or datetime.now().strftime('%Y-%m-%d')
+    try:
+        health = json.loads(SOURCE_HEALTH_FILE.read_text(encoding='utf-8')) \
+            if SOURCE_HEALTH_FILE.exists() else {}
+    except Exception:
+        health = {}
+    for name, count in counts.items():
+        if count > 0:
+            health.pop(name, None)  # 恢复正常，移出观察名单
+        else:
+            entry = health.get(name) or {'fail_streak': 0, 'last_attempt': today_str}
+            entry['fail_streak'] = int(entry.get('fail_streak', 0)) + 1
+            entry['last_attempt'] = today_str
+            health[name] = entry
+    try:
+        STATE_DIR.mkdir(exist_ok=True)
+        SOURCE_HEALTH_FILE.write_text(json.dumps(health, ensure_ascii=False), encoding='utf-8')
+    except Exception as e:
+        logging.warning(f'记录源健康失败: {e}')
+
+
+def get_disabled_sources():
+    """返回已停用的源 {name: entry}（连续 SOURCE_FAIL_DISABLE_DAYS 天无数据）"""
+    try:
+        health = json.loads(SOURCE_HEALTH_FILE.read_text(encoding='utf-8')) \
+            if SOURCE_HEALTH_FILE.exists() else {}
+    except Exception:
+        return {}
+    return {name: e for name, e in health.items()
+            if int(e.get('fail_streak', 0)) >= SOURCE_FAIL_DISABLE_DAYS}
 
 
 def dedupe_articles(news_list):
@@ -597,7 +643,15 @@ def ai_overview(analyzed_news, label='今日'):
 def run_pipeline(kind):
     """抓取 → 去重 → 新鲜度/重复/关键词过滤 → AI 筛选 → AI 分析"""
     conf = PIPELINE[kind]
-    news = fetch_all_news(conf['feeds'])
+    disabled = get_disabled_sources()
+    feeds = dict(conf['feeds'])
+    for name in list(feeds):
+        # 已停用且未到复检时间的源跳过抓取
+        if name in disabled and _days_since(disabled[name].get('last_attempt')) < SOURCE_PROBE_INTERVAL_DAYS:
+            logging.info(f'  （源失效停用，跳过抓取：{name}）')
+            del feeds[name]
+    news, counts = fetch_all_news(feeds)
+    update_source_health(counts)
     fetched = len(news)
     logging.info(f'  共获取 {fetched} 条{conf["label"]}新闻')
     if not news:
@@ -871,7 +925,8 @@ def fetch_market_snapshot():
         return ''
 
 
-def generate_markdown(analyzed_news, date_str, overview='', stats=None, market_md=''):
+def generate_markdown(analyzed_news, date_str, overview='', stats=None, market_md='',
+                      disabled_sources=None):
     """生成 Markdown 内容：统计头 + AI 综述 + 按分类分组的正文"""
     md = f'# 每日热点汇报 - {date_str}\n\n'
 
@@ -891,6 +946,12 @@ def generate_markdown(analyzed_news, date_str, overview='', stats=None, market_m
 
     if market_md:
         md += '## 📈 市场快照\n\n' + market_md + '\n\n---\n\n'
+
+    if disabled_sources:
+        names = '、'.join(f'{name}（连续 {info.get("fail_streak", 0)} 天无数据）'
+                          for name, info in disabled_sources)
+        md += (f'> ⚠️ **源失效（已自动停用，每 {SOURCE_PROBE_INTERVAL_DAYS} 天自动复检）**'
+               f'：{names}\n\n')
 
     # 按分类分组
     by_category = {}
@@ -1135,9 +1196,12 @@ def main(dry_run=False):
     logging.info('[2/3] 生成报告...')
     all_items = dedupe_events(all_items)
     stats['selected'] = len(all_items)
+    disabled_sources = sorted(get_disabled_sources().items(),
+                              key=lambda kv: -kv[1].get('fail_streak', 0))
     market_md = fetch_market_snapshot()
     overview = ai_overview(all_items)
-    md_content = generate_markdown(all_items, today, overview, stats, market_md)
+    md_content = generate_markdown(all_items, today, overview, stats, market_md,
+                                   disabled_sources)
 
     if dry_run:
         # 干跑：完整跑通抓取/AI/报告，但不写 Obsidian、不发邮件、不记防重复状态
