@@ -15,6 +15,7 @@ from pathlib import Path
 
 import markdown
 import requests
+import yaml
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -33,6 +34,24 @@ DEEPSEEK_KEY = _env('DEEPSEEK_API_KEY')
 DEEPSEEK_URL = _env('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
 DEEPSEEK_MODEL = _env('DEEPSEEK_MODEL', 'deepseek-chat')
 REASONING_EFFORT = _env('DEEPSEEK_REASONING_EFFORT', 'none')  # 推理模型默认关闭思考：机械抽取任务无需思维链，且思考会吃满 max_tokens 导致 JSON 截断
+
+# ========== 管道与源配置（config.yaml：加源/加管道改配置不改代码） ==========
+CONFIG_PATH = Path(__file__).resolve().parent / 'config.yaml'
+try:
+    CONFIG = yaml.safe_load(CONFIG_PATH.read_text(encoding='utf-8')) or {}
+except FileNotFoundError:
+    sys.exit(f'缺少配置文件：{CONFIG_PATH}')
+except yaml.YAMLError as e:
+    sys.exit(f'config.yaml 格式错误：{e}')
+
+PIPELINE = CONFIG.get('pipelines') or {}
+for _kind, _conf in PIPELINE.items():
+    _missing = {'label', 'feeds', 'max_total', 'select_rules', 'category', 'key_data'} - set(_conf or {})
+    if _missing:
+        sys.exit(f'config.yaml 管道 {_kind} 缺少字段：{", ".join(sorted(_missing))}')
+if not PIPELINE:
+    sys.exit('config.yaml 未定义任何 pipelines')
+CATEGORY_ORDER = CONFIG.get('categories_order') or []
 SMTP_HOST = _env('SMTP_HOST')
 SMTP_PORT = int(_env('SMTP_PORT', '465'))
 SMTP_USER = _env('SMTP_USER')
@@ -40,52 +59,12 @@ SMTP_AUTH = _env('SMTP_AUTH_CODE')
 EMAIL_TO = _env('EMAIL_TO')
 
 # 借鉴 TrendRadar 的可配置项
-NEWS_MAX_AGE_HOURS = float(_env('NEWS_MAX_AGE_HOURS', '36'))   # 超过 N 小时的文章视为旧闻
+NEWS_MAX_AGE_HOURS = float(_env('NEWS_MAX_AGE_HOURS', str(CONFIG['defaults']['news_max_age_hours'])))   # 超过 N 小时的文章视为旧闻
 FOCUS_KEYWORDS = [k.strip() for k in _env('FOCUS_KEYWORDS').split(',') if k.strip()]
 EXCLUDE_KEYWORDS = [k.strip() for k in _env(
     'EXCLUDE_KEYWORDS', '优惠券,限时优惠,免费领取,抽奖,福利,扫码,带货,种草').split(',') if k.strip()]
 PUSH_WEBHOOK_URL = _env('PUSH_WEBHOOK_URL')   # 群机器人 webhook，留空不推送
 PUSH_WEBHOOK_TYPE = _env('PUSH_WEBHOOK_TYPE', 'feishu')  # feishu / dingtalk / wecom
-
-TECH_FEEDS = {
-    # 国内科技
-    '36氪（科技商业）': 'https://36kr.com/feed',  # 近期返回反爬页面，抓取失败会自动跳过
-    '极客公园（科技商业）': 'https://www.geekpark.net/rss',
-    'Solidot（科技）': 'https://www.solidot.org/index.rss',
-    '少数派（数码效率）': 'https://sspai.com/feed',
-    '爱范儿（消费电子）': 'https://www.ifanr.com/feed',
-    '钛媒体（科技商业）': 'https://www.tmtpost.com/rss.xml',
-    '量子位（AI）': 'https://www.qbitai.com/feed',
-    'IT之家（数码）': 'https://www.ithome.com/rss/',
-    # 国际科技
-    'TechCrunch（国际科技）': 'https://techcrunch.com/feed/',
-    'The Verge（消费科技）': 'https://www.theverge.com/rss/index.xml',
-    'Hacker News（社区热帖）': 'https://hnrss.org/frontpage',
-    'Ars Technica（深度科技）': 'https://feeds.arstechnica.com/arstechnica/index',
-    'MIT科技评论（前沿）': 'https://www.technologyreview.com/feed/',
-    'BBC科技（国际）': 'http://feeds.bbci.co.uk/news/technology/rss.xml',
-}
-
-FINANCE_FEEDS = {
-    # 国内+全球财经
-    '华尔街见闻（全球财经）': 'https://dedicated.wallstreetcn.com/rss.xml',
-    # 美股
-    'CNBC（美股）': 'https://www.cnbc.com/id/100003114/device/rss/rss.html',
-    'MarketWatch（美股）': 'https://feeds.marketwatch.com/marketwatch/topstories/',
-    'SeekingAlpha（美股分析）': 'https://seekingalpha.com/market_currents.xml',
-    'Bloomberg（美股）': 'https://feeds.bloomberg.com/markets/news.rss',
-    'Yahoo Finance（美股）': 'https://finance.yahoo.com/news/rssindex',
-    'Investing（全球市场）': 'https://www.investing.com/rss/news.rss',
-    '经济学人（财经深度）': 'https://www.economist.com/finance-and-economics/rss.xml',
-}
-
-POLITICS_FEEDS = {
-    # 视角互补：国际综合 / 欧洲 / 中东 / 美国
-    'BBC世界（国际政治）': 'http://feeds.bbci.co.uk/news/world/rss.xml',
-    '卫报（国际政治）': 'https://www.theguardian.com/world/rss',
-    '半岛电视台（中东与国际）': 'https://www.aljazeera.com/xml/rss/all.xml',
-    'NYT世界（美国视角）': 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
-}
 
 try:
     import trafilatura
@@ -102,50 +81,7 @@ WEEKLY_MAX_TOTAL = 15       # 周报最终保留的条数
 SOURCE_FAIL_DISABLE_DAYS = int(_env('SOURCE_FAIL_DISABLE_DAYS', '7'))    # 连续 N 天无数据 → 停用
 SOURCE_PROBE_INTERVAL_DAYS = int(_env('SOURCE_PROBE_INTERVAL_DAYS', '14'))  # 停用后每隔 N 天复检一次
 
-# tech / finance / politics 三条管道的差异都收敛在这几个映射里
-PIPELINE = {
-    'tech': {
-        'label': '科技',
-        'feeds': TECH_FEEDS,
-        'max_total': 12,   # 源变多了，日报少留一点，把取舍交给 AI
-        'select_rules': (
-            '1. 优先多样性：确保不同来源、不同领域（AI、芯片、消费电子、互联网、创投、国际科技等）都有覆盖\n'
-            '2. 去除重复/相似话题（如同一事件的不同报道只保留最详细的一条）\n'
-            '3. 去除软文、广告、产品推广、评测类内容\n'
-            '4. 优先选择有实质信息量的深度报道和行业动态'
-        ),
-        'category': '分类（前沿科技/互联网产业/消费电子/科技创投/国际科技/其他）',
-        'key_data': '关键数据点，没有则写无',
-    },
-    'politics': {
-        'label': '政治',
-        'feeds': POLITICS_FEEDS,
-        'max_total': 4,
-        'select_rules': (
-            '1. 优先重大地缘政治事件：国际关系、选举、政策变化、冲突与外交动态\n'
-            '2. 去除重复/相似话题（如同一事件的不同报道只保留最详细的一条）\n'
-            '3. 去除花边新闻、评论专栏和无实质信息的转载\n'
-            '4. 优先选择有实质信息量的深度报道'
-        ),
-        'category': '分类（国际政治/其他）',
-        'key_data': '关键数据点（如票数、制裁金额、军队人数、协议金额等），没有则写无',
-    },
-    'finance': {
-        'label': '财经',
-        'feeds': FINANCE_FEEDS,
-        'max_total': 4,
-        'select_rules': (
-            '1. 优先多样性：确保全球宏观、美股、A股都有覆盖，包括行情走势、政策变化、公司财报、市场分析等\n'
-            '2. 去除重复/相似话题（如同一事件的不同报道只保留最详细的一条）\n'
-            '3. 去除软文、广告、产品推广内容\n'
-            '4. 优先选择有实质信息量的深度分析和重要市场动态'
-        ),
-        'category': '分类（美股市场/其他）',
-        'key_data': '关键数据点（如涨跌幅、指数点位、营收数据等），没有则写无',
-    },
-}
-
-CATEGORY_ORDER = ['前沿科技', '互联网产业', '消费电子', '科技创投', '国际科技', '国际政治', '美股市场', '其他']
+CATEGORY_ORDER = CONFIG.get('categories_order') or []
 
 DIGEST_KEYWORDS = ['晚报', '早报', '日报', '周报', '速报', '快讯', '氪星']
 

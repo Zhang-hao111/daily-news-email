@@ -1,0 +1,68 @@
+# 新闻管道与订阅源配置：加一类新闻、增删 RSS 源、调整保留条数，只改这个文件
+defaults:
+  news_max_age_hours: 36        # 超过 N 小时的文章视为旧闻（环境变量 NEWS_MAX_AGE_HOURS 可覆盖）
+
+categories_order: [前沿科技, 互联网产业, 消费电子, 科技创投, 国际科技, 美股市场, 其他]
+
+pipelines:
+  tech:
+    label: 科技
+    max_total: 12               # 每日精选保留条数
+    category: 分类（前沿科技/互联网产业/消费电子/科技创投/国际科技/其他）
+    key_data: 关键数据点，没有则写无
+    select_rules: |-
+      1. 优先多样性：确保不同来源、不同领域（AI、芯片、消费电子、互联网、创投、国际科技等）都有覆盖
+      2. 去除重复/相似话题（如同一事件的不同报道只保留最详细的一条）
+      3. 去除软文、广告、产品推广、评测类内容
+      4. 优先选择有实质信息量的深度报道和行业动态
+    feeds:
+      36氪（科技商业）: https://36kr.com/feed   # 近期返回反爬页面，会由源健康机制自动停用
+      极客公园（科技商业）: https://www.geekpark.net/rss
+      Solidot（科技）: https://www.solidot.org/index.rss
+      少数派（数码效率）: https://sspai.com/feed
+      爱范儿（消费电子）: https://www.ifanr.com/feed
+      钛媒体（科技商业）: https://www.tmtpost.com/rss.xml
+      量子位（AI）: https://www.qbitai.com/feed
+      IT之家（数码）: https://www.ithome.com/rss/
+      TechCrunch（国际科技）: https://techcrunch.com/feed/
+      The Verge（消费科技）: https://www.theverge.com/rss/index.xml
+      Hacker News（社区热帖）: https://hnrss.org/frontpage
+      Ars Technica（深度科技）: https://feeds.arstechnica.com/arstechnica/index
+      MIT科技评论（前沿）: https://www.technologyreview.com/feed/
+      BBC科技（国际）: http://feeds.bbci.co.uk/news/technology/rss.xml
+
+  politics:
+    label: 政治
+    max_total: 4
+    category: 分类（国际政治/其他）
+    key_data: 关键数据点（如票数、制裁金额、军队人数、协议金额等），没有则写无
+    select_rules: |-
+      1. 优先重大地缘政治事件：国际关系、选举、政策变化、冲突与外交动态
+      2. 去除重复/相似话题（如同一事件的不同报道只保留最详细的一条）
+      3. 去除花边新闻、评论专栏和无实质信息的转载
+      4. 优先选择有实质信息量的深度报道
+    feeds:
+      BBC世界（国际政治）: http://feeds.bbci.co.uk/news/world/rss.xml
+      卫报（国际政治）: https://www.theguardian.com/world/rss
+      半岛电视台（中东与国际）: https://www.aljazeera.com/xml/rss/all.xml
+      NYT世界（美国视角）: https://rss.nytimes.com/services/xml/rss/nyt/World.xml
+
+  finance:
+    label: 财经
+    max_total: 4
+    category: 分类（美股市场/其他）
+    key_data: 关键数据点（如涨跌幅、指数点位、营收数据等），没有则写无
+    select_rules: |-
+      1. 优先多样性：确保全球宏观、美股、A股都有覆盖，包括行情走势、政策变化、公司财报、市场分析等
+      2. 去除重复/相似话题（如同一事件的不同报道只保留最详细的一条）
+      3. 去除软文、广告、产品推广内容
+      4. 优先选择有实质信息量的深度分析和重要市场动态
+    feeds:
+      华尔街见闻（全球财经）: https://dedicated.wallstreetcn.com/rss.xml
+      CNBC（美股）: https://www.cnbc.com/id/100003114/device/rss/rss.html
+      MarketWatch（美股）: https://feeds.marketwatch.com/marketwatch/topstories/
+      SeekingAlpha（美股分析）: https://seekingalpha.com/market_currents.xml
+      Bloomberg（美股）: https://feeds.bloomberg.com/markets/news.rss
+      Yahoo Finance（美股）: https://finance.yahoo.com/news/rssindex
+      Investing（全球市场）: https://www.investing.com/rss/news.rss
+      经济学人（财经深度）: https://www.economist.com/finance-and-economics/rss.xml
