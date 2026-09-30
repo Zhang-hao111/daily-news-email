@@ -191,6 +191,15 @@ def parse_json(text):
     return json.loads(text)
 
 
+def extract_content(resp):
+    """取出回答文本；空响应时带上 finish_reason 和用量，便于定位（如思考吃满 max_tokens）"""
+    choice = resp.choices[0]
+    content = choice.message.content or ''
+    if not content.strip():
+        raise RuntimeError(f'空响应 finish={choice.finish_reason} usage={resp.usage}')
+    return content
+
+
 def parse_feed_date(text):
     """解析 RSS（RFC 822）或 Atom（ISO 8601）日期，失败返回 None"""
     if not text:
@@ -404,11 +413,11 @@ def ai_select(news_list, kind, max_total):
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.3,
-                max_tokens=3000,
+                max_tokens=8000,
             ),
             description='AI 筛选',
         )
-        indices = parse_json(resp.choices[0].message.content)
+        indices = parse_json(extract_content(resp))
         selected = [filtered[int(i)] for i in indices
                     if isinstance(i, (int, float)) and 0 <= int(i) < len(filtered)]
         logging.info(f'  AI 筛选了 {len(selected)} 条{conf["label"]}新闻')
@@ -494,7 +503,7 @@ def analyze_article(client, n, kind):
             temperature=0.3,
             max_tokens=4000,  # deepseek-flash 的思考也计入 max_tokens，预算须覆盖思维链+回答
         )
-        return parse_json(resp.choices[0].message.content)
+        return parse_json(extract_content(resp))
 
     try:
         result = call_with_retry(call, retries=2, description='AI 分析')
@@ -559,7 +568,7 @@ def ai_overview(analyzed_news, label='今日'):
             description=f'{label}综述',
         )
         logging.info(f'  {label}综述生成完成')
-        return resp.choices[0].message.content.strip()
+        return extract_content(resp).strip()
     except Exception as e:
         logging.warning(f'  {label}综述生成失败，跳过: {e}')
         return ''
@@ -686,11 +695,11 @@ def ai_select_weekly(items, max_total=WEEKLY_MAX_TOTAL):
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.3,
-                max_tokens=3000,
+                max_tokens=8000,
             ),
             description='周报 AI 筛选',
         )
-        indices = parse_json(resp.choices[0].message.content)
+        indices = parse_json(extract_content(resp))
         selected = [items[int(i)] for i in indices
                     if isinstance(i, (int, float)) and 0 <= int(i) < len(items)]
         logging.info(f'  周报 AI 筛选了 {len(selected)} 条')
@@ -789,11 +798,11 @@ def dedupe_events(analyzed):
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.1,
-                max_tokens=2000,
+                max_tokens=4000,
             ),
             description='事件去重',
         )
-        data = parse_json(resp.choices[0].message.content)
+        data = parse_json(extract_content(resp))
         drop = set()
         for group in data.get('groups', []):
             keep = group.get('keep')
