@@ -4,4 +4,4 @@ compatibility_date = "2026-09-30"
 
 # 每天北京 07:23（UTC 23:23）触发一次 workflow_dispatch
 [triggers]
-crons = ["23 23 * * *"]
+crons = ["23 23 * * *"]  # 部署命令必须带 --keep-vars,否则 wrangler deploy 会抹掉 GH_TOKEN 机密
