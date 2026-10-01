@@ -6,7 +6,12 @@
 name: Daily News Email
 
 on:
-  workflow_dispatch:  # 触发交给外部定时器（cron-job.org 调本 API），GitHub 自带 schedule 延迟不可控已停用
+  workflow_dispatch:
+    inputs:
+      source:
+        description: '触发来源；cloudflare-worker = 可信定时器，免防抖'
+        default: 'external'
+        type: string
 
 concurrency:
   group: daily-news
@@ -23,6 +28,7 @@ jobs:
     steps:
       # 防抖闸门：无论触发源是什么（定时器/误配的 cron/手动），距上次完成不足 20 分钟一律取消，杜绝邮件轰炸
       - name: Debounce (cancel if previous run finished < 20 min ago)
+        if: github.event.inputs.source != 'cloudflare-worker'
         id: debounce
         env:
           GH_TOKEN: ${{ github.token }}
