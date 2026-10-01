@@ -33,7 +33,10 @@ VAULT_PATH = _env('OBSIDIAN_VAULT_PATH')
 DEEPSEEK_KEY = _env('DEEPSEEK_API_KEY')
 DEEPSEEK_URL = _env('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
 DEEPSEEK_MODEL = _env('DEEPSEEK_MODEL', 'deepseek-chat')
-REASONING_EFFORT = _env('DEEPSEEK_REASONING_EFFORT', 'none')  # 推理模型默认关闭思考：机械抽取任务无需思维链，且思考会吃满 max_tokens 导致 JSON 截断
+# 推理模型（如 deepseek-flash）需要 extra_body 关思考，否则思考吃满 max_tokens 导致 JSON 截断；
+# 非推理模型（如 gpt-4o-mini）不认识该参数，留空即不发送
+REASONING_EFFORT = _env('DEEPSEEK_REASONING_EFFORT', '')
+REASONING_KWARGS = ({'extra_body': {'reasoning_effort': REASONING_EFFORT}} if REASONING_EFFORT else {})
 
 # ========== 管道与源配置（config.yaml：加源/加管道改配置不改代码） ==========
 CONFIG_PATH = Path(__file__).resolve().parent / 'config.yaml'
@@ -395,7 +398,7 @@ def ai_select(news_list, kind, max_total):
             lambda: client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
-            extra_body={'reasoning_effort': REASONING_EFFORT},
+            **REASONING_KWARGS,
                 temperature=0.3,
                 max_tokens=8000,
             ),
@@ -500,7 +503,7 @@ def analyze_article(client, n, kind):
         resp = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
-            extra_body={'reasoning_effort': REASONING_EFFORT},
+            **REASONING_KWARGS,
             temperature=0.3,
             max_tokens=4000,  # deepseek-flash 的思考也计入 max_tokens，预算须覆盖思维链+回答
         )
@@ -563,7 +566,7 @@ def ai_overview(analyzed_news, label='今日'):
             lambda: client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
-            extra_body={'reasoning_effort': REASONING_EFFORT},
+            **REASONING_KWARGS,
                 temperature=0.3,
                 max_tokens=2000,
             ),
@@ -704,7 +707,7 @@ def ai_select_weekly(items, max_total=WEEKLY_MAX_TOTAL):
             lambda: client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
-            extra_body={'reasoning_effort': REASONING_EFFORT},
+            **REASONING_KWARGS,
                 temperature=0.3,
                 max_tokens=8000,
             ),
@@ -808,7 +811,7 @@ def dedupe_events(analyzed):
             lambda: client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
-            extra_body={'reasoning_effort': REASONING_EFFORT},
+            **REASONING_KWARGS,
                 temperature=0.1,
                 max_tokens=4000,
             ),

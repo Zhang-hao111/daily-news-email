@@ -62,9 +62,12 @@ jobs:
       - run: python send_email.py
         if: steps.debounce.outputs.skip != '1'
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
-          DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
+          # LLM 走 GitHub Models 免费额度（Actions 自带令牌授权，无需密钥）
+          # 切回 DeepSeek：改回 secrets.DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL(https://api.deepseek.com) / DEEPSEEK_MODEL(deepseek-flash)
+          # 并在 env 里加 DEEPSEEK_REASONING_EFFORT: none（推理模型必须关思考）
+          DEEPSEEK_API_KEY: ${{ github.token }}
+          DEEPSEEK_BASE_URL: https://models.github.ai/inference/
+          DEEPSEEK_MODEL: openai/gpt-4o-mini
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
