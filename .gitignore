@@ -5,3 +5,5 @@ __pycache__/
 venv/
 logs/
 state/
+cloudflare/.wrangler/
+cloudflare/*.log
