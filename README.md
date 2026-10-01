@@ -1,6 +1,6 @@
 # 每日新闻日报 · 周报自动化
 
-RSS 抓取 → DeepSeek AI 筛选/分析 → Markdown 报告 → 邮件推送，可选 Obsidian 归档。支持 GitHub Actions 免服务器定时运行，每天早上把 20 条最重要的新闻送进邮箱，每周一自动加发周报。
+RSS 抓取 → AI（LLM）筛选/分析 → Markdown 报告 → 邮件推送，可选 Obsidian 归档。支持 GitHub Actions 免服务器定时运行，每天早上把 20 条最重要的新闻送进邮箱，每周一自动加发周报。默认接智谱 `glm-4.7-flash`（免费），任何 OpenAI 兼容接口都能换。
 
 ## 特性
 
@@ -31,7 +31,9 @@ python send_email.py --dry-run   # 干跑验证（调 AI，但不发邮件/不�
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `DEEPSEEK_API_KEY` | ✅ | DeepSeek API Key（[platform.deepseek.com](https://platform.deepseek.com)） |
+| `LLM_API_KEY` | ✅ | LLM API Key。推荐智谱免费模型（[bigmodel.cn](https://open.bigmodel.cn)，`glm-4.7-flash` 永久免费）；也可用 DeepSeek（[platform.deepseek.com](https://platform.deepseek.com)）等任意 OpenAI 兼容接口 |
+| `LLM_BASE_URL` / `LLM_MODEL` | 可选 | 默认 `https://open.bigmodel.cn/api/paas/v4` + `glm-4.7-flash`；换 DeepSeek 时填 `https://api.deepseek.com` + `deepseek-flash` |
+| `LLM_EXTRA_BODY` | 可选 | 供应商私有参数（JSON）。智谱思考模型需 `{"thinking":{"type":"disabled"}}` 关思考，否则思考内容吃满 max_tokens 导致 JSON 截断。DeepSeek 推理模型对应 `{"reasoning_effort":"none"}`（旧变量名 `DEEPSEEK_*` 仍兼容） |
 | `SMTP_HOST` / `SMTP_PORT` | ✅ | SMTP 服务器，如 `smtp.qq.com` / `465`（SSL）或 `smtp.gmail.com` / `587`（STARTTLS） |
 | `SMTP_USER` / `SMTP_AUTH_CODE` | ✅ | 发件邮箱 + 授权码（QQ 邮箱用授权码，Gmail 用应用专用密码） |
 | `EMAIL_TO` | ✅ | 收件人，多个用英文逗号分隔 |
@@ -46,7 +48,7 @@ python send_email.py --dry-run   # 干跑验证（调 AI，但不发邮件/不�
 ### 云端部署（GitHub Actions，推荐）
 
 1. Fork 本仓库（或推到自己的新仓库）
-2. 仓库 Settings → Secrets and variables → Actions，添加上表中的 Secrets（至少 DeepSeek 和 SMTP 五项）
+2. 仓库 Settings → Secrets and variables → Actions，添加上表中的 Secrets（至少 LLM 和 SMTP 五项）
 3. 完成 —— 运行入口是 `daily.yml` 的 workflow_dispatch，可在 Actions 页手动触发
 
 云端不需要配置 `OBSIDIAN_VAULT_PATH`（自动跳过存档）；`state/` 目录（防重复记录 + 周报积累）通过 Actions Cache 跨运行持久化。发件邮箱注意：QQ/163 等国内邮箱的 SMTP 会拒绝 GitHub Actions 海外 IP，云端建议用 Gmail（应用专用密码，端口 587），本机运行则无限制。

@@ -30,13 +30,19 @@ def _env(key, default=''):
 
 # ========== 配置 ==========
 VAULT_PATH = _env('OBSIDIAN_VAULT_PATH')
-DEEPSEEK_KEY = _env('DEEPSEEK_API_KEY')
-DEEPSEEK_URL = _env('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
-DEEPSEEK_MODEL = _env('DEEPSEEK_MODEL', 'deepseek-chat')
-# 推理模型（如 deepseek-flash）需要 extra_body 关思考，否则思考吃满 max_tokens 导致 JSON 截断；
-# 非推理模型（如 gpt-4o-mini）不认识该参数，留空即不发送
-REASONING_EFFORT = _env('DEEPSEEK_REASONING_EFFORT', '')
-REASONING_KWARGS = ({'extra_body': {'reasoning_effort': REASONING_EFFORT}} if REASONING_EFFORT else {})
+# LLM：任意 OpenAI 兼容供应商。默认智谱 glm-4.7-flash（免费），DeepSeek 等换 LLM_BASE_URL/LLM_MODEL 即可；
+# 旧变量名 DEEPSEEK_* 仍兼容。未配置 key 时自动降级为均匀采样
+LLM_KEY = _env('LLM_API_KEY') or _env('DEEPSEEK_API_KEY')
+LLM_URL = _env('LLM_BASE_URL') or _env('DEEPSEEK_BASE_URL') or 'https://open.bigmodel.cn/api/paas/v4'
+LLM_MODEL = _env('LLM_MODEL') or _env('DEEPSEEK_MODEL') or 'glm-4.7-flash'
+# 供应商私有参数走 extra_body（JSON），如智谱思考模型关思考：LLM_EXTRA_BODY={"thinking":{"type":"disabled"}}，
+# 留空不发送。思考不关会导致思考内容吃满 max_tokens、正文 JSON 被截断
+_extra_raw = _env('LLM_EXTRA_BODY', '')
+try:
+    _extra_body = json.loads(_extra_raw) if _extra_raw else None
+except json.JSONDecodeError as e:
+    sys.exit(f'LLM_EXTRA_BODY 不是合法 JSON：{e}')
+EXTRA_BODY_KWARGS = {'extra_body': _extra_body} if _extra_body else {}
 
 # ========== 管道与源配置（config.yaml：加源/加管道改配置不改代码） ==========
 CONFIG_PATH = Path(__file__).resolve().parent / 'config.yaml'
@@ -110,15 +116,15 @@ def setup_logging():
 
 setup_logging()
 
-_ds_client = None
+_llm_client = None
 
 
-def get_ds_client():
-    """懒加载 DeepSeek 客户端；未配置 API key 时返回 None"""
-    global _ds_client
-    if _ds_client is None and DEEPSEEK_KEY:
-        _ds_client = OpenAI(api_key=DEEPSEEK_KEY, base_url=DEEPSEEK_URL)
-    return _ds_client
+def get_llm_client():
+    """懒加载 LLM 客户端；未配置 API key 时返回 None"""
+    global _llm_client
+    if _llm_client is None and LLM_KEY:
+        _llm_client = OpenAI(api_key=LLM_KEY, base_url=LLM_URL)
+    return _llm_client
 
 
 # ========== 通用工具 ==========
@@ -369,9 +375,9 @@ def balanced_sample(news_list, max_total=40):
 # ========== 第2步：AI 筛选与分析 ==========
 def ai_select(news_list, kind, max_total):
     """用 AI 从新闻中筛选最有价值的文章，保证多样性；失败时降级为均匀采样"""
-    client = get_ds_client()
+    client = get_llm_client()
     if client is None:
-        logging.warning('  未配置 DEEPSEEK_API_KEY，跳过 AI 筛选，使用均匀采样')
+        logging.warning('  未配置 LLM_API_KEY，跳过 AI 筛选，使用均匀采样')
         return balanced_sample(news_list, max_total)
 
     filtered = filter_excluded(news_list)
@@ -396,9 +402,9 @@ def ai_select(news_list, kind, max_total):
     try:
         resp = call_with_retry(
             lambda: client.chat.completions.create(
-                model=DEEPSEEK_MODEL,
+                model=LLM_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
-            **REASONING_KWARGS,
+            **EXTRA_BODY_KWARGS,
                 temperature=0.3,
                 max_tokens=8000,
             ),
@@ -501,9 +507,9 @@ def analyze_article(client, n, kind):
 
     def call():
         resp = client.chat.completions.create(
-            model=DEEPSEEK_MODEL,
+            model=LLM_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
-            **REASONING_KWARGS,
+            **EXTRA_BODY_KWARGS,
             temperature=0.3,
             max_tokens=4000,  # deepseek-flash 的思考也计入 max_tokens，预算须覆盖思维链+回答
         )
@@ -533,9 +539,9 @@ def analyze_all(news_list, kind):
     """并发分析新闻，结果顺序与输入一致"""
     if not news_list:
         return []
-    client = get_ds_client()
+    client = get_llm_client()
     if client is None:
-        logging.warning('  未配置 DEEPSEEK_API_KEY，直接使用 RSS 摘要')
+        logging.warning('  未配置 LLM_API_KEY，直接使用 RSS 摘要')
         return [fallback_result(n) for n in news_list]
 
     results = [None] * len(news_list)
@@ -550,7 +556,7 @@ def analyze_all(news_list, kind):
 
 def ai_overview(analyzed_news, label='今日'):
     """借鉴 TrendRadar 的 AI 分析简报：为一批新闻生成一段整体综述"""
-    client = get_ds_client()
+    client = get_llm_client()
     if client is None or not analyzed_news:
         return ''
     lines = '\n'.join(f"- [{n.get('category', '其他')}] {n['title']}"
@@ -564,9 +570,9 @@ def ai_overview(analyzed_news, label='今日'):
     try:
         resp = call_with_retry(
             lambda: client.chat.completions.create(
-                model=DEEPSEEK_MODEL,
+                model=LLM_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
-            **REASONING_KWARGS,
+            **EXTRA_BODY_KWARGS,
                 temperature=0.3,
                 max_tokens=2000,
             ),
@@ -679,9 +685,9 @@ def balanced_weekly_sample(items, max_total):
 
 def ai_select_weekly(items, max_total=WEEKLY_MAX_TOTAL):
     """AI 从一周积累的精选文章中挑出本周最重要的几条"""
-    client = get_ds_client()
+    client = get_llm_client()
     if client is None:
-        logging.warning('  未配置 DEEPSEEK_API_KEY，周报使用分类均匀取样')
+        logging.warning('  未配置 LLM_API_KEY，周报使用分类均匀取样')
         return balanced_weekly_sample(items, max_total)
     if not items:
         return []
@@ -705,9 +711,9 @@ def ai_select_weekly(items, max_total=WEEKLY_MAX_TOTAL):
     try:
         resp = call_with_retry(
             lambda: client.chat.completions.create(
-                model=DEEPSEEK_MODEL,
+                model=LLM_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
-            **REASONING_KWARGS,
+            **EXTRA_BODY_KWARGS,
                 temperature=0.3,
                 max_tokens=8000,
             ),
@@ -791,7 +797,7 @@ def generate_weekly_report(now_dt):
 
 def dedupe_events(analyzed):
     """跨分类事件去重：同一事件的多篇报道只保留 AI 认为信息量最大的一条，失败时原样返回"""
-    client = get_ds_client()
+    client = get_llm_client()
     if client is None or len(analyzed) < 2:
         return analyzed
 
@@ -809,9 +815,9 @@ def dedupe_events(analyzed):
     try:
         resp = call_with_retry(
             lambda: client.chat.completions.create(
-                model=DEEPSEEK_MODEL,
+                model=LLM_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
-            **REASONING_KWARGS,
+            **EXTRA_BODY_KWARGS,
                 temperature=0.1,
                 max_tokens=4000,
             ),
@@ -1115,8 +1121,8 @@ def main(dry_run=False):
     today = datetime.now().strftime('%Y-%m-%d')
     logging.info(f'===== 每日热点汇报 {today} =====' + ('（dry-run）' if dry_run else ''))
 
-    if not DEEPSEEK_KEY:
-        logging.warning('未配置 DEEPSEEK_API_KEY，本次将不使用 AI 筛选/分析')
+    if not LLM_KEY:
+        logging.warning('未配置 LLM_API_KEY，本次将不使用 AI 筛选/分析')
 
     # 1. 三条管道并行：抓取 → 过滤 → AI 筛选 → 分析
     logging.info(f'[1/3] 运行{len(PIPELINE)}条管道（{"、".join(c["label"] for c in PIPELINE.values())}）...')

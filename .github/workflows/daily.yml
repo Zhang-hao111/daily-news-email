@@ -1,6 +1,6 @@
 # 云端部署（替代本机 schtasks 定时任务，二选一避免重复邮件）。
-# Secrets 需要：DEEPSEEK_API_KEY、SMTP_HOST/PORT/USER/AUTH_CODE、EMAIL_TO，
-# 可选：FOCUS_KEYWORDS、EXCLUDE_KEYWORDS、PUSH_WEBHOOK_URL/PUSH_WEBHOOK_TYPE、NEWS_MAX_AGE_HOURS。
+# Secrets 需要：LLM_API_KEY、SMTP_HOST/PORT/USER/AUTH_CODE、EMAIL_TO，
+# 可选：LLM_BASE_URL/LLM_MODEL/LLM_EXTRA_BODY（默认智谱 glm-4.7-flash 关思考）、FOCUS_KEYWORDS、EXCLUDE_KEYWORDS、PUSH_WEBHOOK_URL/PUSH_WEBHOOK_TYPE、NEWS_MAX_AGE_HOURS。
 # 无 OBSIDIAN_VAULT_PATH 时脚本自动跳过 Obsidian 存档。
 # 注意：GitHub 会在仓库 60 天无提交后停用定时工作流，偶尔推个提交即可保活。
 name: Daily News Email
@@ -62,10 +62,10 @@ jobs:
       - run: python send_email.py
         if: steps.debounce.outputs.skip != '1'
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
-          DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
-          DEEPSEEK_REASONING_EFFORT: none
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_EXTRA_BODY: ${{ secrets.LLM_EXTRA_BODY || '{"thinking":{"type":"disabled"}}' }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
