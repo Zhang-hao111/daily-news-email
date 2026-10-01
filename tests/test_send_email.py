@@ -60,6 +60,80 @@ def test_extract_content():
         s.extract_content(_fake_resp(''))
 
 
+def _rate_limited(body_text):
+    """构造带智谱错误码的 429 异常（APIStatusError 需要假 response）"""
+    resp = SimpleNamespace(status_code=429, request=SimpleNamespace(), headers={})
+    return s.RateLimitError(body_text, response=resp, body=None)
+
+
+class _FakeCompletions:
+    """记录每次请求用的 model，按剧本依次抛异常/返回结果"""
+
+    def __init__(self, script):
+        self.script = script
+        self.models = []
+
+    def create(self, model=None, **kwargs):
+        self.models.append(model)
+        step = self.script.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
+
+
+class _FakeChatClient:
+    def __init__(self, script):
+        self.chat = SimpleNamespace(completions=_FakeCompletions(script))
+
+
+def test_chat_completion_falls_back_on_quota(monkeypatch):
+    monkeypatch.setattr(s, '_active_model', 'paid-model')
+    monkeypatch.setattr(s, 'FALLBACK_MODEL', 'free-model')
+    client = _FakeChatClient([
+        _rate_limited("Error code: 429 - {'error': {'code': '1113', 'message': '余额不足或无可用资源包,请充值。'}}"),
+        _fake_resp('ok'),
+    ])
+    assert s.extract_content(s.chat_completion(client, messages=[])) == 'ok'
+    assert client.chat.completions.models == ['paid-model', 'free-model']
+    assert s._active_model == 'free-model'
+
+
+def test_chat_completion_keeps_model_on_plain_rate_limit(monkeypatch):
+    monkeypatch.setattr(s, '_active_model', 'paid-model')
+    monkeypatch.setattr(s, 'FALLBACK_MODEL', 'free-model')
+    client = _FakeChatClient([
+        _rate_limited("Error code: 429 - {'error': {'code': '1302', 'message': '速率限制'}}"),
+    ])
+    with pytest.raises(s.RateLimitError):
+        s.chat_completion(client, messages=[])
+    assert client.chat.completions.models == ['paid-model']
+    assert s._active_model == 'paid-model'
+
+
+def test_chat_completion_no_loop_when_fallback_same(monkeypatch):
+    monkeypatch.setattr(s, '_active_model', 'free-model')
+    monkeypatch.setattr(s, 'FALLBACK_MODEL', 'free-model')
+    client = _FakeChatClient([
+        _rate_limited("Error code: 429 - {'error': {'code': '1113', 'message': '余额不足'}}"),
+    ])
+    with pytest.raises(s.RateLimitError):
+        s.chat_completion(client, messages=[])
+    assert client.chat.completions.models == ['free-model']
+
+
+def test_call_with_retry_skips_retry_on_quota(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(s.time, 'sleep', lambda sec: sleeps.append(sec))
+    err = _rate_limited("Error code: 429 - {'error': {'code': '1113', 'message': '余额不足'}}")
+
+    def boom():
+        raise err
+
+    with pytest.raises(s.RateLimitError):
+        s.call_with_retry(boom, retries=4, description='x')
+    assert sleeps == []
+
+
 def test_parse_score():
     assert s._parse_score(8) == 8
     assert s._parse_score('9.6') == 9

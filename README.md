@@ -34,6 +34,7 @@ python send_email.py --dry-run   # 干跑验证（调 AI，但不发邮件/不�
 | `LLM_API_KEY` | ✅ | LLM API Key。推荐智谱免费模型（[bigmodel.cn](https://open.bigmodel.cn)，`glm-4.7-flash` 永久免费）；也可用 DeepSeek（[platform.deepseek.com](https://platform.deepseek.com)）等任意 OpenAI 兼容接口 |
 | `LLM_BASE_URL` / `LLM_MODEL` | 可选 | 默认 `https://open.bigmodel.cn/api/paas/v4` + `glm-4.7-flash`；换 DeepSeek 时填 `https://api.deepseek.com` + `deepseek-flash` |
 | `LLM_EXTRA_BODY` | 可选 | 供应商私有参数（JSON）。智谱思考模型需 `{"thinking":{"type":"disabled"}}` 关思考，否则思考内容吃满 max_tokens 导致 JSON 截断。DeepSeek 推理模型对应 `{"reasoning_effort":"none"}`（旧变量名 `DEEPSEEK_*` 仍兼容） |
+| `LLM_FALLBACK_MODEL` | 可选 | 主模型额度耗尽（智谱错误码 1113）时自动切换的兜底模型，默认 `glm-4.7-flash`。每次运行仍先试主模型，充值后自动切回，无需改配置 |
 | `SMTP_HOST` / `SMTP_PORT` | ✅ | SMTP 服务器，如 `smtp.qq.com` / `465`（SSL）或 `smtp.gmail.com` / `587`（STARTTLS） |
 | `SMTP_USER` / `SMTP_AUTH_CODE` | ✅ | 发件邮箱 + 授权码（QQ 邮箱用授权码，Gmail 用应用专用密码） |
 | `EMAIL_TO` | ✅ | 收件人，多个用英文逗号分隔 |

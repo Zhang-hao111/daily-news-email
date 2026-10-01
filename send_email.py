@@ -127,6 +127,26 @@ def get_llm_client():
     return _llm_client
 
 
+# 主模型额度耗尽（智谱错误码 1113）时自动切换的兜底模型；与主模型相同即等于关闭
+FALLBACK_MODEL = _env('LLM_FALLBACK_MODEL') or 'glm-4.7-flash'
+_active_model = LLM_MODEL
+
+
+def chat_completion(client, **kwargs):
+    """统一 LLM 调用入口。主模型额度耗尽（智谱 1113，充值前一直如此，重试无用）时
+    自动切换到 FALLBACK_MODEL 并重试本次请求，后续调用也全部走兜底模型；
+    每次运行都从主模型试起，充值/资源包恢复后会自动切回，无需人工改配置"""
+    global _active_model
+    try:
+        return client.chat.completions.create(model=_active_model, **kwargs)
+    except RateLimitError as e:
+        if _active_model != FALLBACK_MODEL and ('1113' in str(e) or '余额不足' in str(e)):
+            logging.warning(f'  主模型 {_active_model} 额度耗尽，本次运行起自动改用免费模型 {FALLBACK_MODEL}')
+            _active_model = FALLBACK_MODEL
+            return client.chat.completions.create(model=_active_model, **kwargs)
+        raise
+
+
 # ========== 通用工具 ==========
 def strip_html(text):
     return re.sub(r'<[^>]+>', '', text).strip()
@@ -173,6 +193,8 @@ def call_with_retry(fn, retries=4, description=''):
         except BadRequestError:
             raise
         except RateLimitError as e:
+            if '1113' in str(e) or '余额不足' in str(e):
+                raise  # 额度耗尽不是限流，重试无意义（chat_completion 已负责切换兜底模型）
             if attempt == retries:
                 raise
             wait = 5 * attempt
@@ -410,8 +432,8 @@ def ai_select(news_list, kind, max_total):
 
     try:
         resp = call_with_retry(
-            lambda: client.chat.completions.create(
-                model=LLM_MODEL,
+            lambda: chat_completion(
+                client,
                 messages=[{'role': 'user', 'content': prompt}],
             **EXTRA_BODY_KWARGS,
                 temperature=0.3,
@@ -515,12 +537,12 @@ def analyze_article(client, n, kind):
 }}"""
 
     def call():
-        resp = client.chat.completions.create(
-            model=LLM_MODEL,
+        resp = chat_completion(
+            client,
             messages=[{'role': 'user', 'content': prompt}],
             **EXTRA_BODY_KWARGS,
             temperature=0.3,
-            max_tokens=4000,  # deepseek-flash 的思考也计入 max_tokens，预算须覆盖思维链+回答
+            max_tokens=4000,  # 思考型模型不关思考时思考也计入 max_tokens，预算须覆盖思维链+回答
         )
         return parse_json(extract_content(resp))
 
@@ -578,8 +600,8 @@ def ai_overview(analyzed_news, label='今日'):
 
     try:
         resp = call_with_retry(
-            lambda: client.chat.completions.create(
-                model=LLM_MODEL,
+            lambda: chat_completion(
+                client,
                 messages=[{'role': 'user', 'content': prompt}],
             **EXTRA_BODY_KWARGS,
                 temperature=0.3,
@@ -719,8 +741,8 @@ def ai_select_weekly(items, max_total=WEEKLY_MAX_TOTAL):
 
     try:
         resp = call_with_retry(
-            lambda: client.chat.completions.create(
-                model=LLM_MODEL,
+            lambda: chat_completion(
+                client,
                 messages=[{'role': 'user', 'content': prompt}],
             **EXTRA_BODY_KWARGS,
                 temperature=0.3,
@@ -823,8 +845,8 @@ def dedupe_events(analyzed):
 
     try:
         resp = call_with_retry(
-            lambda: client.chat.completions.create(
-                model=LLM_MODEL,
+            lambda: chat_completion(
+                client,
                 messages=[{'role': 'user', 'content': prompt}],
             **EXTRA_BODY_KWARGS,
                 temperature=0.1,
