@@ -11,7 +11,7 @@ export default {
         'Content-Type': 'application/json',
         'User-Agent': 'daily-news-trigger'
       },
-      body: JSON.stringify({ ref: 'main', inputs: { source: 'cloudflare-worker' } })
+      body: JSON.stringify({ ref: 'main' })
     });
     console.log('dispatch status:', resp.status);
   }
