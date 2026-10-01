@@ -47,9 +47,17 @@ python send_email.py --dry-run   # 干跑验证（调 AI，但不发邮件/不�
 
 1. Fork 本仓库（或推到自己的新仓库）
 2. 仓库 Settings → Secrets and variables → Actions，添加上表中的 Secrets（至少 DeepSeek 和 SMTP 五项）
-3. 完成 —— `.github/workflows/daily.yml` 每天 UTC 23:23（北京时间约 07:23）自动运行，GitHub 定时调度存在分钟级到小时级的正常延迟，也可在 Actions 页手动触发
+3. 完成 —— 运行入口是 `daily.yml` 的 workflow_dispatch，可在 Actions 页手动触发
 
-云端不需要配置 `OBSIDIAN_VAULT_PATH`（自动跳过存档）；`state/` 目录（防重复记录 + 周报积累）通过 Actions Cache 跨运行持久化。发件邮箱注意：QQ/163 等国内邮箱的 SMTP 会拒绝 GitHub Actions 海外 IP，云端建议用 Gmail（应用专用密码，端口 587），本机运行则无限制。仓库 60 天无提交会停用定时工作流，自带 `keepalive.yml` 保活。
+云端不需要配置 `OBSIDIAN_VAULT_PATH`（自动跳过存档）；`state/` 目录（防重复记录 + 周报积累）通过 Actions Cache 跨运行持久化。发件邮箱注意：QQ/163 等国内邮箱的 SMTP 会拒绝 GitHub Actions 海外 IP，云端建议用 Gmail（应用专用密码，端口 587），本机运行则无限制。
+
+### 定时触发（Cloudflare Worker）
+
+GitHub 自带的 schedule 调度延迟不可控（实测单次延迟 5.5 小时），已移除。定时由外部 Cloudflare Worker 精确触发：每天 UTC 23:23（北京时间约 07:23）调用本仓库的 workflow_dispatch。
+
+Fork 后搭建自己的触发器（约 5 分钟）：注册 [Cloudflare](https://dash.cloudflare.com) → Workers 和 Pages → 创建一个 Worker，粘贴 `cloudflare/worker.js`，在变量和机密里添加 `GH_TOKEN`（仅限本仓库 Actions: read and write 的 fine-grained 令牌），Cron 触发器填 `23 23 * * *`。部署命令需带 `--keep-vars`，否则会抹掉机密。
+
+工作流自带防抖闸门：20 分钟内的重复触发自动取消（带可信标记 `source=cloudflare-worker` 的触发除外），无论幽灵定时器还是误操作都不会造成邮件轰炸。仓库 60 天无提交会停用工作流，自带 `keepalive.yml` 每月保活。
 
 ## 本地定时（Windows）
 

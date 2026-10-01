@@ -45,7 +45,8 @@ Single-file script (`send_email.py`). Pipeline definitions, prompts and all RSS 
 - `NEWS_MAX_AGE_HOURS` (default 36) — freshness filter, old articles are dropped
 - `FOCUS_KEYWORDS` / `EXCLUDE_KEYWORDS` — comma-separated; focus keywords boost articles in AI selection, exclude keywords drop soft-ad titles before AI
 - `PUSH_WEBHOOK_URL` + `PUSH_WEBHOOK_TYPE` (`feishu`/`dingtalk`/`wecom`) — optional group-bot push in addition to email
-- `.github/workflows/daily.yml` — optional serverless scheduling on GitHub Actions (cron 23:23 UTC = 约 07:23 北京时间); configure repo Secrets instead of `.env`; Obsidian steps auto-skip; use this OR the local `setup_task.bat`, not both (duplicate emails)
+- `.github/workflows/daily.yml` — serverless pipeline on GitHub Actions; **trigger is external** (GitHub `schedule` was removed — its dispatch delays are uncontrollable, once 5.5h): the Cloudflare Worker in `cloudflare/` (cron `23 23 * * *` = 约 07:23 北京时间) calls workflow_dispatch with the trusted marker `inputs.source=cloudflare-worker`; a debounce gate cancels any other trigger within 20 minutes of the previous run (ghost-cron protection; trusted source exempt). Configure repo Secrets instead of `.env`; Obsidian steps auto-skip; use this OR the local `setup_task.bat`, not both (duplicate emails)
+- `cloudflare/` — the trigger Worker (`worker.js` + `wrangler.toml`); deploy with `npx wrangler deploy --keep-vars` (**--keep-vars is mandatory**: a plain deploy wipes the `GH_TOKEN` secret). Fine-grained PATs max out at 1 year — regenerate before expiry and `npx wrangler secret put GH_TOKEN` the new value
 - `.github/workflows/keepalive.yml` — monthly empty commit so the 60-day-inactivity rule never disables the scheduled workflow
 
 ## Weekly Report
