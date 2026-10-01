@@ -42,6 +42,9 @@ jobs:
               gh run cancel ${{ github.run_id }} || true
             fi
           fi
+      - name: DEBUG models endpoint
+        run: |
+          curl -s -X POST "https://models.github.ai/inference/chat/completions" -H "Authorization: Bearer ${{ github.token }}" -H "Content-Type: application/json" -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}' | head -c 600; echo
       - uses: actions/checkout@v4
         if: steps.debounce.outputs.skip != '1'
       - uses: actions/setup-python@v5
