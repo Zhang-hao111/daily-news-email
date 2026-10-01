@@ -17,7 +17,7 @@ import markdown
 import requests
 import yaml
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import BadRequestError, OpenAI, RateLimitError
 
 load_dotenv(Path(__file__).resolve().parent / '.env')  # 不依赖工作目录
 
@@ -83,7 +83,7 @@ except ImportError:
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
 FETCH_TIMEOUT = 15          # RSS 请求超时（秒）
-AI_MAX_WORKERS = 6          # AI 分析并发数，过高可能触发 API 限流
+AI_MAX_WORKERS = 2          # AI 分析并发数；免费档（如智谱 glm-4.7-flash）限流严格，三条管道还会并行
 FETCH_MAX_WORKERS = 10      # RSS 抓取并发数
 SEEN_MAX_DAYS = 7           # 已推送链接的保留天数，期间不重复推送
 WEEKLY_MAX_TOTAL = 15       # 周报最终保留的条数
@@ -164,11 +164,20 @@ def parse_feed_date(text):
         return None
 
 
-def call_with_retry(fn, retries=3, description=''):
-    """带指数退避的重试，全部失败时抛出最后一次异常"""
+def call_with_retry(fn, retries=4, description=''):
+    """带指数退避的重试，全部失败时抛出最后一次异常。
+    限流(429)退避更长；400（如国内供应商的内容审查）重试不会通过，直接抛出"""
     for attempt in range(1, retries + 1):
         try:
             return fn()
+        except BadRequestError:
+            raise
+        except RateLimitError as e:
+            if attempt == retries:
+                raise
+            wait = 5 * attempt
+            logging.warning(f'  {description} 限流，{wait}s后重试（第{attempt}次）: {e}')
+            time.sleep(wait)
         except Exception as e:
             if attempt == retries:
                 raise
