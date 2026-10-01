@@ -1,0 +1,7 @@
+name = "daily-news-trigger"
+main = "worker.js"
+compatibility_date = "2026-09-30"
+
+# 每天北京 07:23（UTC 23:23）触发一次 workflow_dispatch
+[triggers]
+crons = ["23 23 * * *"]
