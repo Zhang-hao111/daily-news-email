@@ -62,6 +62,7 @@ jobs:
       - run: python send_email.py
         if: steps.debounce.outputs.skip != '1'
         env:
+          TZ: Asia/Shanghai  # 容器默认 UTC，不设则报告日期和周一的周报判定都差一天
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
