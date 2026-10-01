@@ -14,6 +14,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write  # 防抖闸门需要取消运行的权限
 
 jobs:
   run:
@@ -22,6 +23,7 @@ jobs:
     steps:
       # 防抖闸门：无论触发源是什么（定时器/误配的 cron/手动），距上次完成不足 20 分钟一律取消，杜绝邮件轰炸
       - name: Debounce (cancel if previous run finished < 20 min ago)
+        id: debounce
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -29,26 +31,30 @@ jobs:
           if [ -n "$PREV" ]; then
             DIFF=$(( $(date +%s -d "$PREV") - $(date +%s) ))
             if [ $DIFF -gt -1200 ]; then
+              echo "skip=1" >> "$GITHUB_OUTPUT"
               echo "上次运行距今 $((-DIFF)) 秒，判定为重复触发，取消本次"
-              gh run cancel ${{ github.run_id }}
-              exit 0
+              gh run cancel ${{ github.run_id }} || true
             fi
           fi
-          echo "距上次运行超过 20 分钟，正常执行"
       - uses: actions/checkout@v4
+        if: steps.debounce.outputs.skip != '1'
       - uses: actions/setup-python@v5
+        if: steps.debounce.outputs.skip != '1'
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
+        if: steps.debounce.outputs.skip != '1'
       # state/ 保存防重复推送记录和周报积累数据，跨运行持久化
       - name: Restore state cache (dedupe + weekly accumulation)
         uses: actions/cache@v4
+        if: steps.debounce.outputs.skip != '1'
         with:
           path: state
           key: news-state-${{ github.run_id }}
           restore-keys: |
             news-state-
       - run: python send_email.py
+        if: steps.debounce.outputs.skip != '1'
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
