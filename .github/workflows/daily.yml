@@ -20,6 +20,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # 防抖闸门：无论触发源是什么（定时器/误配的 cron/手动），距上次完成不足 20 分钟一律取消，杜绝邮件轰炸
+      - name: Debounce (cancel if previous run finished < 20 min ago)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV=$(gh api "repos/${{ github.repository }}/actions/workflows/daily.yml/runs?event=workflow_dispatch&per_page=2" --jq '[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].created_at // empty')
+          if [ -n "$PREV" ]; then
+            DIFF=$(( $(date +%s -d "$PREV") - $(date +%s) ))
+            if [ $DIFF -gt -1200 ]; then
+              echo "上次运行距今 $((-DIFF)) 秒，判定为重复触发，取消本次"
+              gh run cancel ${{ github.run_id }}
+              exit 0
+            fi
+          fi
+          echo "距上次运行超过 20 分钟，正常执行"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
