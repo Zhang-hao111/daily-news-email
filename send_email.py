@@ -4,6 +4,7 @@ import os
 import re
 import smtplib
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -130,6 +131,10 @@ def get_llm_client():
 # 主模型额度耗尽（智谱错误码 1113）时自动切换的兜底模型；与主模型相同即等于关闭
 FALLBACK_MODEL = _env('LLM_FALLBACK_MODEL') or 'glm-4.7-flash'
 _active_model = LLM_MODEL
+# 全局 LLM 并发闸门：三条管道并行、每条内部还有分析线程池，峰值并发会触发供应商
+# 账户级限流（智谱 1302），用信号量把同时在线的 LLM 请求压到这个数以内
+LLM_MAX_CONCURRENT = int(_env('LLM_MAX_CONCURRENT', '2'))
+_llm_gate = threading.Semaphore(LLM_MAX_CONCURRENT)
 
 
 def chat_completion(client, **kwargs):
@@ -137,14 +142,15 @@ def chat_completion(client, **kwargs):
     自动切换到 FALLBACK_MODEL 并重试本次请求，后续调用也全部走兜底模型；
     每次运行都从主模型试起，充值/资源包恢复后会自动切回，无需人工改配置"""
     global _active_model
-    try:
-        return client.chat.completions.create(model=_active_model, **kwargs)
-    except RateLimitError as e:
-        if _active_model != FALLBACK_MODEL and ('1113' in str(e) or '余额不足' in str(e)):
-            logging.warning(f'  主模型 {_active_model} 额度耗尽，本次运行起自动改用免费模型 {FALLBACK_MODEL}')
-            _active_model = FALLBACK_MODEL
+    with _llm_gate:
+        try:
             return client.chat.completions.create(model=_active_model, **kwargs)
-        raise
+        except RateLimitError as e:
+            if _active_model != FALLBACK_MODEL and ('1113' in str(e) or '余额不足' in str(e)):
+                logging.warning(f'  主模型 {_active_model} 额度耗尽，本次运行起自动改用免费模型 {FALLBACK_MODEL}')
+                _active_model = FALLBACK_MODEL
+                return client.chat.completions.create(model=_active_model, **kwargs)
+            raise
 
 
 # ========== 通用工具 ==========
