@@ -134,6 +134,93 @@ def test_call_with_retry_skips_retry_on_quota(monkeypatch):
     assert sleeps == []
 
 
+def _content_filtered():
+    """构造智谱内容审查拦截的 400 异常"""
+    body = ("Error code: 400 - {'contentFilter': [{'level': 1, 'role': 'user'}], "
+            "'error': {'code': '1301', 'message': '系统检测到输入或生成内容可能包含不安全或敏感内容'}}")
+    resp = SimpleNamespace(status_code=400, request=SimpleNamespace(), headers={})
+    return s.BadRequestError(body, response=resp, body=None)
+
+
+def test_is_content_filter_error():
+    assert s.is_content_filter_error(_content_filtered())
+    assert not s.is_content_filter_error(ValueError('AI 返回的不是 JSON 对象'))
+
+
+def test_ai_select_retries_with_titles_only_on_content_filter(monkeypatch):
+    """内容审查拦截后改用仅标题提示词重试，仍是 AI 挑选而不是降级为均匀采样"""
+    prompts = []
+
+    def fake_chat(client, **kwargs):
+        prompts.append(kwargs['messages'][0]['content'])
+        if len(prompts) == 1:
+            raise _content_filtered()
+        return _fake_resp('[1, 0]')
+
+    monkeypatch.setattr(s, 'get_llm_client', lambda: object())
+    monkeypatch.setattr(s, 'chat_completion', fake_chat)
+    news = [{'source': 'S1', 'title': '标题一', 'content': '这是摘要一'},
+            {'source': 'S2', 'title': '标题二', 'content': '这是摘要二'}]
+
+    selected = s.ai_select(news, 'tech', 2)
+
+    assert len(prompts) == 2
+    assert '这是摘要一' in prompts[0] and '【S1】' in prompts[0]
+    assert '这是摘要一' not in prompts[1] and '【S1】' not in prompts[1]
+    assert [n['title'] for n in selected] == ['标题二', '标题一']
+
+
+def test_ai_select_falls_back_when_brief_prompt_also_filtered(monkeypatch):
+    """精简提示词仍被拦截时才降级为均匀采样"""
+    def fake_chat(client, **kwargs):
+        raise _content_filtered()
+
+    monkeypatch.setattr(s, 'get_llm_client', lambda: object())
+    monkeypatch.setattr(s, 'chat_completion', fake_chat)
+    news = [{'source': 'S1', 'title': '标题一', 'content': '摘要'}]
+
+    assert [n['title'] for n in s.ai_select(news, 'tech', 1)] == ['标题一']
+
+
+def test_analyze_article_retries_with_title_only_on_content_filter(monkeypatch):
+    """正文被审查拦截时改用仅标题重试，仍能拿到 AI 分析结果"""
+    prompts = []
+
+    def fake_chat(client, **kwargs):
+        prompts.append(kwargs['messages'][0]['content'])
+        if len(prompts) == 1:
+            raise _content_filtered()
+        return _fake_resp(json.dumps({'category': '国际政治', 'summary': '摘要',
+                                      'key_data': '无', 'comment': '点评', 'score': 7}))
+
+    monkeypatch.setattr(s, 'chat_completion', fake_chat)
+    n = {'source': 'S1', 'title': '标题一', 'content': 'RSS 正文摘要', 'url': 'u'}
+
+    out = s.analyze_article(object(), n, 'politics')
+
+    assert len(prompts) == 2
+    assert 'RSS 正文摘要' in prompts[0]
+    assert 'RSS 正文摘要' not in prompts[1]
+    assert out['score'] == 7 and out['summary'] == '摘要' and out['title'] == '标题一'
+
+
+def test_analyze_article_falls_back_on_plain_failure(monkeypatch):
+    """非内容审查的失败不做无谓重试，直接退回 RSS 摘要"""
+    calls = []
+
+    def fake_chat(client, **kwargs):
+        calls.append(1)
+        raise ValueError('boom')
+
+    monkeypatch.setattr(s, 'chat_completion', fake_chat)
+    n = {'source': 'S1', 'title': '标题一', 'content': 'RSS 正文摘要', 'url': 'u'}
+
+    out = s.analyze_article(object(), n, 'politics')
+
+    assert len(calls) == 2  # call_with_retry(retries=2) 的两次尝试，没有第三次精简重试
+    assert out['category'] == '其他' and out['summary'] == 'RSS 正文摘要'
+
+
 def test_parse_score():
     assert s._parse_score(8) == 8
     assert s._parse_score('9.6') == 9

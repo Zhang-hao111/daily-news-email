@@ -214,6 +214,13 @@ def call_with_retry(fn, retries=4, description=''):
             time.sleep(wait)
 
 
+def is_content_filter_error(exc):
+    """是否为供应商内容审查拦截（智谱 400/1301）。这类请求重试无用，但提示词里
+    去掉正文/摘要、只留标题通常能通过，所以调用方会改用精简提示词再试一次"""
+    text = str(exc)
+    return any(marker in text for marker in ('1301', 'contentFilter', '敏感内容'))
+
+
 # ========== 第1步：抓取 RSS ==========
 def fetch_rss(url, timeout=FETCH_TIMEOUT):
     """从 RSS 源抓取新闻，支持 RSS 2.0 和 Atom，附带发布时间"""
@@ -411,7 +418,8 @@ def balanced_sample(news_list, max_total=40):
 
 # ========== 第2步：AI 筛选与分析 ==========
 def ai_select(news_list, kind, max_total):
-    """用 AI 从新闻中筛选最有价值的文章，保证多样性；失败时降级为均匀采样"""
+    """用 AI 从新闻中筛选最有价值的文章，保证多样性；失败时降级为均匀采样。
+    命中内容审查（政治/财经新闻容易触发智谱 1301）时改用仅标题的精简提示词再试一次"""
     client = get_llm_client()
     if client is None:
         logging.warning('  未配置 LLM_API_KEY，跳过 AI 筛选，使用均匀采样')
@@ -421,13 +429,17 @@ def ai_select(news_list, kind, max_total):
     if not filtered:
         return []
 
-    list_text = '\n'.join(
-        f"[{i}] 【{n['source']}】{n['title']} — {(n.get('content') or '')[:80]}"
-        for i, n in enumerate(filtered)
-    )
     conf = PIPELINE[kind]
     focus_hint = f'\n与这些关注关键词相关的文章优先入选：{"、".join(FOCUS_KEYWORDS)}\n' if FOCUS_KEYWORDS else ''
-    prompt = f"""以下是 {len(filtered)} 条{conf['label']}新闻，请从中挑选最有新闻价值的 {max_total} 条。
+
+    def build_prompt(brief):
+        # brief：去掉来源和摘要只留标题，显著降低触发内容审查的概率
+        list_text = '\n'.join(
+            f"[{i}] {n['title']}" if brief else
+            f"[{i}] 【{n['source']}】{n['title']} — {(n.get('content') or '')[:80]}"
+            for i, n in enumerate(filtered)
+        )
+        return f"""以下是 {len(filtered)} 条{conf['label']}新闻，请从中挑选最有新闻价值的 {max_total} 条。
 
 挑选原则：
 {conf['select_rules']}{focus_hint}
@@ -436,7 +448,7 @@ def ai_select(news_list, kind, max_total):
 
 只输出一个 JSON 数组，包含选中文章的编号，例如 [0, 3, 5, 7]，不要输出其他内容。"""
 
-    try:
+    def attempt(prompt):
         resp = call_with_retry(
             lambda: chat_completion(
                 client,
@@ -448,13 +460,23 @@ def ai_select(news_list, kind, max_total):
             description='AI 筛选',
         )
         indices = parse_json(extract_content(resp))
-        selected = [filtered[int(i)] for i in indices
-                    if isinstance(i, (int, float)) and 0 <= int(i) < len(filtered)]
-        logging.info(f'  AI 筛选了 {len(selected)} 条{conf["label"]}新闻')
-        return selected[:max_total]
+        return [filtered[int(i)] for i in indices
+                if isinstance(i, (int, float)) and 0 <= int(i) < len(filtered)]
+
+    try:
+        selected = attempt(build_prompt(brief=False))
     except Exception as e:
-        logging.warning(f'  AI 筛选失败，降级使用均匀采样: {e}')
-        return balanced_sample(news_list, max_total)
+        if not is_content_filter_error(e):
+            logging.warning(f'  AI 筛选失败，降级使用均匀采样: {e}')
+            return balanced_sample(news_list, max_total)
+        logging.warning('  AI 筛选被内容审查拦截，改用仅标题提示词重试')
+        try:
+            selected = attempt(build_prompt(brief=True))
+        except Exception as e2:
+            logging.warning(f'  精简提示词仍失败，降级使用均匀采样: {e2}')
+            return balanced_sample(news_list, max_total)
+    logging.info(f'  AI 筛选了 {len(selected)} 条{conf["label"]}新闻')
+    return selected[:max_total]
 
 
 def fallback_result(n):
@@ -523,16 +545,21 @@ def _parse_score(value):
 
 
 def analyze_article(client, n, kind):
-    """分析单条新闻，输出分类/摘要/关键数据/点评/重要性评分"""
+    """分析单条新闻，输出分类/摘要/关键数据/点评/重要性评分。
+    正文命中内容审查时改用仅标题重试一次（要求保守概括，拿不准的数据写无）"""
     conf = PIPELINE[kind]
-    content = n.get('full_text') or (n.get('content') or '')[:300]
-    content_note = '（以下为文章正文节选）' if n.get('full_text') else '（以下为 RSS 摘要，信息有限请勿过度发挥）'
-    prompt = f"""分析这条{conf['label']}新闻，输出JSON：
+
+    def build_prompt(brief):
+        if brief:
+            body = '（正文因内容审查被省略，请仅依据标题保守概括，拿不准的数据写"无"）\n'
+        else:
+            content = n.get('full_text') or (n.get('content') or '')[:300]
+            note = '（以下为文章正文节选）' if n.get('full_text') else '（以下为 RSS 摘要，信息有限请勿过度发挥）'
+            body = f'{note}\n{content}\n'
+        return f"""分析这条{conf['label']}新闻，输出JSON：
 标题：{n['title']}
 来源：{n['source']}
-{content_note}
-{content}
-
+{body}
 输出格式（只输出JSON）：
 {{
   "category": "{conf['category']}",
@@ -542,7 +569,7 @@ def analyze_article(client, n, kind):
   "score": "1-10的整数，新闻重要性评分（10=全球重大事件，7-8=行业大事，5-6=常规动态，4以下=琐碎）"
 }}"""
 
-    def call():
+    def attempt(prompt):
         resp = chat_completion(
             client,
             messages=[{'role': 'user', 'content': prompt}],
@@ -550,15 +577,26 @@ def analyze_article(client, n, kind):
             temperature=0.3,
             max_tokens=4000,  # 思考型模型不关思考时思考也计入 max_tokens，预算须覆盖思维链+回答
         )
-        return parse_json(extract_content(resp))
-
-    try:
-        result = call_with_retry(call, retries=2, description='AI 分析')
+        result = parse_json(extract_content(resp))
         if not isinstance(result, dict):
             raise ValueError(f'AI 返回的不是 JSON 对象: {type(result).__name__}')
+        return result
+
+    def analyze(prompt):
+        return call_with_retry(lambda: attempt(prompt), retries=2, description='AI 分析')
+
+    try:
+        result = analyze(build_prompt(brief=False))
     except Exception as e:
-        logging.warning(f'  分析失败: {n["title"][:30]}... - {e}')
-        return fallback_result(n)
+        if not is_content_filter_error(e):
+            logging.warning(f'  分析失败: {n["title"][:30]}... - {e}')
+            return fallback_result(n)
+        logging.warning(f'  内容审查拦截，改用仅标题重试: {n["title"][:30]}...')
+        try:
+            result = analyze(build_prompt(brief=True))
+        except Exception as e2:
+            logging.warning(f'  分析失败: {n["title"][:30]}... - {e2}')
+            return fallback_result(n)
 
     return {
         'title': n['title'],
